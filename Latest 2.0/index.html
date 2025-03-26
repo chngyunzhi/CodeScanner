@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Item Scanner</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <h1><i class="fas fa-barcode"></i> Item Scanner</h1>
+        <div class="header-buttons">
+            <button id="showNetworkBtn" class="icon-button" title="Show Network Info">
+                <i class="fas fa-wifi"></i>
+            </button>
+            <button id="openFolderBtn" class="icon-button" title="Open Scans Folder">
+                <i class="fas fa-folder-open"></i>
+            </button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="upload-section">
+            <p>Upload your Excel file</p>
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
+        </div>
+
+        <div id="itemInfo" class="item-info">
+            <div class="info-row">
+                <label>Item Code:</label>
+                <span id="itemCode">-</span>
+            </div>
+            <div class="info-row">
+                <label>Part Number:</label>
+                <span id="partNumber">-</span>
+            </div>
+            <div class="info-row">
+                <label>Scans Left:</label>
+                <span id="scansLeft">-</span>
+            </div>
+        </div>
+
+        <div class="scan-section">
+            <input type="text" id="scanInput" placeholder="Scan barcode..." autocomplete="off" />
+            <div class="navigation-buttons">
+                <button id="backButton" disabled><i class="fas fa-arrow-left"></i> Back</button>
+                <button id="skipButton" disabled>Skip <i class="fas fa-arrow-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="networkModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Network Access</h2>
+            <p>Scan the QR code or use one of the following URLs to access the application:</p>
+            <div id="qrCode"></div>
+            <ul id="addressList"></ul>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html> 
