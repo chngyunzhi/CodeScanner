@@ -6,7 +6,7 @@
     <title>Item Scanner</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
 </head>
 <body>
     <div class="header">
@@ -23,11 +23,11 @@
 
     <div class="container">
         <div class="upload-section">
-            <p>Upload your Excel file</p>
-            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display: none;">
+            <p>Click to upload Excel or CSV file or drag and drop here</p>
         </div>
 
-        <div id="itemInfo" class="item-info">
+        <div class="item-info" id="itemInfo">
             <div class="info-row">
                 <label>Item Code:</label>
                 <span id="itemCode">-</span>
@@ -43,7 +43,13 @@
         </div>
 
         <div class="scan-section">
-            <input type="text" id="scanInput" placeholder="Scan barcode..." autocomplete="off" />
+            <div class="scan-input-container">
+                <input type="text" id="scanInput" placeholder="Scan or enter code...">
+                <button id="toggleScannerBtn" class="icon-button" title="Toggle Scanner">
+                    <i class="fas fa-camera"></i>
+                </button>
+            </div>
+            <div id="reader" style="display: none;"></div>
             <div class="navigation-buttons">
                 <button id="backButton" disabled><i class="fas fa-arrow-left"></i> Back</button>
                 <button id="skipButton" disabled>Skip <i class="fas fa-arrow-right"></i></button>
@@ -57,10 +63,11 @@
             <h2>Network Access</h2>
             <p>Scan the QR code or use one of the following URLs to access the application:</p>
             <div id="qrCode"></div>
-            <ul id="addressList"></ul>
+            <div id="addressList"></div>
         </div>
     </div>
 
+    <script src="https://unpkg.com/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script src="app.js"></script>
 </body>
 </html> 

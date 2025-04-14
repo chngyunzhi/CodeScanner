@@ -7,6 +7,17 @@ let isMobileDevice = false;
 // Add error sound
 const errorSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
 
+// Add variable to track modal state
+let isNetworkModalOpen = false;
+let networkRefreshInterval = null;
+
+// Add scanner variables
+let html5QrcodeScanner = null;
+let isScannerActive = false;
+
+// Add variable to track current session
+let currentSession = '';
+
 // Check if user is on mobile device
 fetch('/check-mobile')
     .then(response => response.json())
@@ -16,19 +27,133 @@ fetch('/check-mobile')
     })
     .catch(error => console.error('Error checking device type:', error));
 
-document.getElementById('fileInput').addEventListener('change', handleFileUpload);
-document.getElementById('scanInput').addEventListener('keydown', handleScan);
-document.getElementById('skipButton').addEventListener('click', handleSkip);
-document.getElementById('backButton').addEventListener('click', handleBack);
-document.getElementById('openFolderBtn').addEventListener('click', handleFolderClick);
-document.getElementById('showNetworkBtn').addEventListener('click', showNetworkInfo);
-document.querySelector('.close').addEventListener('click', hideNetworkInfo);
-window.addEventListener('click', (event) => {
-    const modal = document.getElementById('networkModal');
-    if (event.target === modal) {
-        hideNetworkInfo();
-    }
+document.addEventListener('DOMContentLoaded', function() {
+    // Add event listener for file input
+    document.getElementById('fileInput').addEventListener('change', handleFileUpload);
+    
+    // Add event listeners for network info and folder buttons
+    document.getElementById('showNetworkBtn').addEventListener('click', showNetworkInfo);
+    document.querySelector('.close').addEventListener('click', hideNetworkInfo);
+    document.getElementById('networkModal').addEventListener('click', function(event) {
+        if (event.target === this) {
+            hideNetworkInfo();
+        }
+    });
+    
+    document.getElementById('openFolderBtn').addEventListener('click', handleFolderClick);
+    
+    // Add event listener for scan input
+    const scanInput = document.getElementById('scanInput');
+    scanInput.addEventListener('keydown', handleScan);
+    
+    // Add event listeners for navigation buttons
+    document.getElementById('backButton').addEventListener('click', handleBack);
+    document.getElementById('skipButton').addEventListener('click', handleSkip);
+    
+    // Add scanner initialization
+    document.getElementById('toggleScannerBtn').addEventListener('click', toggleScanner);
+    
+    // Add drag and drop for file upload
+    const uploadSection = document.querySelector('.upload-section');
+    uploadSection.addEventListener('click', () => document.getElementById('fileInput').click());
+    uploadSection.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        uploadSection.classList.add('drag-over');
+    });
+    uploadSection.addEventListener('dragleave', () => {
+        uploadSection.classList.remove('drag-over');
+    });
+    uploadSection.addEventListener('drop', (e) => {
+        e.preventDefault();
+        uploadSection.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            const fileInput = document.getElementById('fileInput');
+            fileInput.files = e.dataTransfer.files;
+            handleFileUpload({ target: fileInput });
+        }
+    });
+    
+    // Check if user is on mobile and if there's already an Excel file
+    checkMobileAndExcelStatus();
+
+    // Auto-focus the scan input
+    scanInput.focus();
 });
+
+// Function to check if user is on mobile and check for existing Excel
+async function checkMobileAndExcelStatus() {
+    try {
+        // Check if user is on mobile
+        const mobileResponse = await fetch('/check-mobile');
+        const mobileData = await mobileResponse.json();
+        
+        if (mobileData.isMobile) {
+            // If on mobile, check for latest items
+            checkForLatestItems();
+        }
+    } catch (error) {
+        console.error('Error checking device type:', error);
+    }
+}
+
+// Function to check for latest items from server
+async function checkForLatestItems() {
+    try {
+        const response = await fetch('/latest-items');
+        const data = await response.json();
+        
+        if (data.hasData) {
+            // Show notification that Excel data is available
+            const uploadSection = document.querySelector('.upload-section');
+            uploadSection.innerHTML = `
+                <p>Excel data available! Uploaded: ${new Date(data.timestamp).toLocaleString()}</p>
+                <button id="useSharedExcel" class="action-button">Use Shared Data</button>
+                <button id="downloadExcel" class="action-button secondary">Download Excel</button>
+            `;
+            
+            // Add event listeners for the new buttons
+            document.getElementById('useSharedExcel').addEventListener('click', useSharedExcelData);
+            document.getElementById('downloadExcel').addEventListener('click', downloadExcelFile);
+        }
+    } catch (error) {
+        console.error('Error checking for latest items:', error);
+    }
+}
+
+// Function to use shared Excel data
+async function useSharedExcelData() {
+    try {
+        const response = await fetch('/latest-items');
+        const data = await response.json();
+        
+        if (data.hasData) {
+            // Use the items directly
+            allItems = data.items;
+            currentItemIndex = 0;
+            
+            // Display the first item
+            displayCurrentItem();
+            
+            // Update the upload section
+            const uploadSection = document.querySelector('.upload-section');
+            uploadSection.innerHTML = `
+                <p>Using shared Excel data. Uploaded: ${new Date(data.timestamp).toLocaleString()}</p>
+                <p>Total items: ${allItems.length}</p>
+            `;
+            
+            console.log('Shared data loaded successfully. Items:', allItems);
+        }
+    } catch (error) {
+        console.error('Error using shared Excel data:', error);
+        alert('Error loading shared Excel data. Please try again.');
+    }
+}
+
+// Function to download the Excel file
+function downloadExcelFile() {
+    window.location.href = '/download-excel';
+}
 
 function updateFolderButton() {
     const folderBtn = document.getElementById('openFolderBtn');
@@ -78,8 +203,24 @@ function handleFileUpload(event) {
             if (data.items && data.items.length > 0) {
                 allItems = data.items;
                 currentItemIndex = 0;
+                // Track the current session folder
+                currentSession = data.sessionFolder;
                 displayCurrentItem();
                 document.getElementById('scanInput').focus();
+                
+                // Update the upload section to show current session info
+                const uploadSection = document.querySelector('.upload-section');
+                uploadSection.innerHTML = `
+                    <div class="current-session-info">
+                        <p><strong>Active File:</strong> ${data.originalFileName}</p>
+                        <p><strong>Session:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
+                        <p><strong>Items:</strong> ${allItems.length}</p>
+                    </div>
+                    <button id="viewSessions" class="action-button secondary">View Previous Sessions</button>
+                `;
+                
+                // Add listener for the view sessions button
+                document.getElementById('viewSessions').addEventListener('click', showSessionsModal);
             } else {
                 alert('No items found in the Excel file');
             }
@@ -260,10 +401,41 @@ function handleBack() {
 
 // Function to show network information
 function showNetworkInfo() {
+    isNetworkModalOpen = true;
+    const modal = document.getElementById('networkModal');
+    modal.style.display = 'block';
+    
+    // Initial fetch
+    fetchAndUpdateNetworkInfo();
+    
+    // Set up periodic refresh while modal is open
+    networkRefreshInterval = setInterval(fetchAndUpdateNetworkInfo, 10000); // Refresh every 10 seconds
+}
+
+function hideNetworkInfo() {
+    isNetworkModalOpen = false;
+    const modal = document.getElementById('networkModal');
+    modal.style.display = 'none';
+    
+    // Clear refresh interval
+    if (networkRefreshInterval) {
+        clearInterval(networkRefreshInterval);
+        networkRefreshInterval = null;
+    }
+    
+    // Stop scanner if active
+    stopScanner();
+    
+    // Restore focus to scan input
+    document.getElementById('scanInput').focus();
+}
+
+function fetchAndUpdateNetworkInfo() {
+    if (!isNetworkModalOpen) return;
+
     fetch('/network-info')
         .then(response => response.json())
         .then(data => {
-            const modal = document.getElementById('networkModal');
             const qrCodeDiv = document.getElementById('qrCode');
             const addressList = document.getElementById('addressList');
             
@@ -271,10 +443,16 @@ function showNetworkInfo() {
             qrCodeDiv.innerHTML = '';
             addressList.innerHTML = '';
             
-            // Only generate QR code if public URL is available
-            if (data.publicUrl) {
+            // Handle public URL - ensure we're using itemscanner.loca.lt
+            let publicUrl = data.publicUrl;
+            
+            // Check if we have a public URL
+            if (publicUrl) {
+                console.log('Public URL received:', publicUrl);
+                
+                // Generate QR code
                 new QRCode(qrCodeDiv, {
-                    text: data.publicUrl,
+                    text: publicUrl,
                     width: 200,
                     height: 200,
                     colorDark: "#000000",
@@ -282,16 +460,22 @@ function showNetworkInfo() {
                     correctLevel: QRCode.CorrectLevel.H
                 });
 
-                // Display public URL
+                // Display public URL with clear label
                 const publicUrlItem = document.createElement('div');
                 publicUrlItem.className = 'public-url';
-                publicUrlItem.textContent = data.publicUrl;
+                publicUrlItem.innerHTML = `
+                    <strong>Public URL (Scan QR code or click):</strong><br>
+                    <a href="${publicUrl}" target="_blank">${publicUrl}</a>
+                `;
                 addressList.appendChild(publicUrlItem);
             } else {
                 const errorMsg = document.createElement('div');
                 errorMsg.className = 'error-message';
-                errorMsg.textContent = 'Public URL not available. Please try again in a moment.';
+                errorMsg.textContent = 'Connecting to public URL... Please wait.';
                 addressList.appendChild(errorMsg);
+                
+                // If no public URL is available, try again in 3 seconds
+                setTimeout(fetchAndUpdateNetworkInfo, 3000);
             }
 
             // Display local network addresses
@@ -303,23 +487,226 @@ function showNetworkInfo() {
 
                 data.addresses.forEach(address => {
                     const li = document.createElement('li');
-                    li.textContent = `http://${address}:${data.port}`;
+                    const localUrl = `http://${address}:${data.port}`;
+                    li.innerHTML = `<a href="${localUrl}" target="_blank">${localUrl}</a>`;
                     addressList.appendChild(li);
                 });
             }
-
-            modal.style.display = 'block';
+            
+            // Add note about connections at the bottom
+            const note = document.createElement('div');
+            note.className = 'connection-note';
+            note.innerHTML = `
+                <p>
+                    <strong>Note:</strong> The public URL (itemscanner.loca.lt) 
+                    can be accessed from any network. Local addresses only work when 
+                    connected to the same network as the server.
+                </p>
+            `;
+            addressList.appendChild(note);
         })
         .catch(error => {
             console.error('Error fetching network info:', error);
-            alert('Error getting network information');
+            if (isNetworkModalOpen) {
+                const addressList = document.getElementById('addressList');
+                addressList.innerHTML = '<div class="error-message">Error connecting to server. Retrying...</div>';
+                setTimeout(fetchAndUpdateNetworkInfo, 3000);
+            }
         });
 }
 
-// Function to hide network information
-function hideNetworkInfo() {
-    const modal = document.getElementById('networkModal');
-    modal.style.display = 'none';
-    // Restore focus to scan input after closing modal
+function toggleScanner() {
+    const readerDiv = document.getElementById('reader');
+    const toggleButton = document.getElementById('toggleScannerBtn');
+
+    if (!isScannerActive) {
+        // Start scanner
+        readerDiv.style.display = 'block';
+        toggleButton.classList.add('active');
+        
+        html5QrcodeScanner = new Html5Qrcode("reader");
+        const config = {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+        };
+
+        html5QrcodeScanner.start(
+            { facingMode: "environment" },
+            config,
+            onScanSuccess,
+            onScanError
+        )
+        .then(() => {
+            isScannerActive = true;
+            console.log("Scanner started successfully");
+        })
+        .catch((err) => {
+            console.error("Error starting scanner:", err);
+            alert("Could not start camera scanner. Please check camera permissions.");
+            stopScanner();
+        });
+    } else {
+        stopScanner();
+    }
+}
+
+function stopScanner() {
+    if (html5QrcodeScanner && isScannerActive) {
+        html5QrcodeScanner.stop()
+            .then(() => {
+                console.log('Scanner stopped');
+                document.getElementById('reader').style.display = 'none';
+                document.getElementById('toggleScannerBtn').classList.remove('active');
+                isScannerActive = false;
+                html5QrcodeScanner = null;
+            })
+            .catch((err) => {
+                console.error('Error stopping scanner:', err);
+            });
+    }
+}
+
+function onScanSuccess(decodedText, decodedResult) {
+    // Stop scanning after successful scan
+    stopScanner();
+    
+    // Set the scanned value to the input
+    const scanInput = document.getElementById('scanInput');
+    scanInput.value = decodedText;
+    
+    // Trigger the scan handling
+    scanInput.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        which: 13,
+        bubbles: true
+    }));
+}
+
+function onScanError(error) {
+    // Handle scan error silently
+    console.warn(`Code scan error = ${error}`);
+}
+
+// Add a function to show sessions modal
+function showSessionsModal() {
+    // Create modal if it doesn't exist
+    let sessionsModal = document.getElementById('sessionsModal');
+    if (!sessionsModal) {
+        sessionsModal = document.createElement('div');
+        sessionsModal.id = 'sessionsModal';
+        sessionsModal.className = 'modal';
+        
+        const modalContent = document.createElement('div');
+        modalContent.className = 'modal-content';
+        
+        const closeSpan = document.createElement('span');
+        closeSpan.className = 'close';
+        closeSpan.innerHTML = '&times;';
+        closeSpan.onclick = hideSessionsModal;
+        
+        const modalTitle = document.createElement('h2');
+        modalTitle.textContent = 'Previous Sessions';
+        
+        const sessionsList = document.createElement('div');
+        sessionsList.id = 'sessionsList';
+        
+        modalContent.appendChild(closeSpan);
+        modalContent.appendChild(modalTitle);
+        modalContent.appendChild(sessionsList);
+        sessionsModal.appendChild(modalContent);
+        
+        // Add click handler to close modal when clicking outside
+        sessionsModal.onclick = function(event) {
+            if (event.target === this) {
+                hideSessionsModal();
+            }
+        };
+        
+        document.body.appendChild(sessionsModal);
+    }
+    
+    // Fetch and display sessions
+    fetchSessions();
+    
+    // Show the modal
+    sessionsModal.style.display = 'block';
+}
+
+// Function to hide sessions modal
+function hideSessionsModal() {
+    const modal = document.getElementById('sessionsModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+    // Restore focus to scan input
     document.getElementById('scanInput').focus();
+}
+
+// Function to fetch sessions
+function fetchSessions() {
+    fetch('/sessions')
+        .then(response => response.json())
+        .then(data => {
+            const sessionsList = document.getElementById('sessionsList');
+            sessionsList.innerHTML = '';
+            
+            if (data.sessions.length === 0) {
+                sessionsList.innerHTML = '<p>No previous sessions found</p>';
+                return;
+            }
+            
+            // Create a list of sessions
+            data.sessions.forEach(session => {
+                const sessionItem = document.createElement('div');
+                sessionItem.className = 'session-item';
+                
+                const date = new Date(session.date).toLocaleString();
+                
+                // Extract file name from session name if possible
+                let displayName = "Session";
+                const sessionNameParts = session.name.split('_');
+                if (sessionNameParts.length > 2) {
+                    // Try to get original file name (everything after timestamp)
+                    const fileNameParts = sessionNameParts.slice(2).join('_');
+                    if (fileNameParts) {
+                        displayName = fileNameParts.replace(/_/g, ' ');
+                    }
+                }
+                
+                sessionItem.innerHTML = `
+                    <div class="session-info">
+                        <strong>${displayName}</strong>
+                        <span>${date}</span>
+                        <span>${session.fileCount} item${session.fileCount !== 1 ? 's' : ''} scanned</span>
+                    </div>
+                    <div class="session-actions">
+                        <button class="action-button small" data-session="${session.name}" data-action="download">
+                            <i class="fas fa-download"></i> Download
+                        </button>
+                    </div>
+                `;
+                
+                sessionsList.appendChild(sessionItem);
+                
+                // Add event listener for download button
+                const downloadBtn = sessionItem.querySelector('[data-action="download"]');
+                downloadBtn.addEventListener('click', function() {
+                    const sessionName = this.getAttribute('data-session');
+                    downloadSession(sessionName);
+                });
+            });
+        })
+        .catch(error => {
+            console.error('Error fetching sessions:', error);
+            const sessionsList = document.getElementById('sessionsList');
+            sessionsList.innerHTML = '<p>Error loading sessions</p>';
+        });
+}
+
+// Function to download a specific session
+function downloadSession(sessionName) {
+    window.location.href = `/download-session/${sessionName}`;
 } 
