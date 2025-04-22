@@ -18,6 +18,9 @@ let isScannerActive = false;
 // Add variable to track current session
 let currentSession = '';
 
+// Add a new array to store scan progress for each item
+let itemsProgress = [];
+
 // Check if user is on mobile device
 fetch('/check-mobile')
     .then(response => response.json())
@@ -132,6 +135,12 @@ async function useSharedExcelData() {
             allItems = data.items;
             currentItemIndex = 0;
             
+            // Initialize progress tracking for all items
+            itemsProgress = allItems.map(item => ({
+                scansRemaining: item.scansRequired,
+                serialNumbers: []
+            }));
+            
             // Display the first item
             displayCurrentItem();
             
@@ -203,6 +212,11 @@ function handleFileUpload(event) {
             if (data.items && data.items.length > 0) {
                 allItems = data.items;
                 currentItemIndex = 0;
+                // Initialize progress tracking for all items
+                itemsProgress = allItems.map(item => ({
+                    scansRemaining: item.scansRequired,
+                    serialNumbers: []
+                }));
                 // Track the current session folder
                 currentSession = data.sessionFolder;
                 displayCurrentItem();
@@ -239,9 +253,9 @@ function displayCurrentItem() {
     const currentItem = allItems[currentItemIndex];
     document.getElementById('itemCode').textContent = currentItem.itemCode || 'N/A';
     document.getElementById('partNumber').textContent = currentItem.partNumber || 'N/A';
-    document.getElementById('scansLeft').textContent = currentItem.scansRequired || '0';
+    document.getElementById('scansLeft').textContent = itemsProgress[currentItemIndex].scansRemaining || '0';
     currentPartNumber = currentItem.partNumber;
-    scansRemaining = currentItem.scansRequired;
+    scansRemaining = itemsProgress[currentItemIndex].scansRemaining;
 
     // Clear and focus the scan input field
     const scanInput = document.getElementById('scanInput');
@@ -326,7 +340,12 @@ function handleScan(event) {
                 // Save only the serial number
                 saveScan(serialNumber);
                 
+                // Store the serial number in our progress tracking
+                itemsProgress[currentItemIndex].serialNumbers.push(serialNumber);
+                
                 scansRemaining--;
+                // Update the progress tracking
+                itemsProgress[currentItemIndex].scansRemaining = scansRemaining;
                 document.getElementById('scansLeft').textContent = scansRemaining;
                 
                 if (scansRemaining === 0) {
