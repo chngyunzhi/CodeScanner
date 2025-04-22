@@ -361,8 +361,8 @@ app.post('/upload', upload.single('file'), (req, res) => {
                 .slice(1) // Skip first row
                 .filter(row => row[2] && row[2].toString().trim() !== '') // Check if Item Code exists
                 .map(row => {
-                    const itemCode = row[2] || '';    // Column C - Item Code
-                    const partNumber = row[3] || '';  // Column D - Part Number
+                    const itemCode = row[3] || '';    // Column C - Item Code
+                    const partNumber = row[2] || '';  // Column D - Part Number
                     const pc = row[4] || '0';         // Column E - Pcs
                     
                     // Clean the part number by removing 'P/N' and any surrounding spaces
