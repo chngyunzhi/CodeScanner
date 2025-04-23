@@ -12,6 +12,9 @@
     <div class="header">
         <h1><i class="fas fa-barcode"></i> Item Scanner</h1>
         <div class="header-buttons">
+            <button id="extractModeBtn" class="icon-button" title="Serial Number Extractor">
+                <i class="fas fa-tools"></i>
+            </button>
             <button id="showNetworkBtn" class="icon-button" title="Show Network Info">
                 <i class="fas fa-wifi"></i>
             </button>
@@ -21,7 +24,7 @@
         </div>
     </div>
 
-    <div class="container">
+    <div class="container" id="mainContainer">
         <div class="upload-section">
             <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display: none;">
             <p>Click to upload Excel or CSV file or drag and drop here</p>
@@ -53,6 +56,39 @@
             <div class="navigation-buttons">
                 <button id="backButton" disabled><i class="fas fa-arrow-left"></i> Back</button>
                 <button id="skipButton" disabled>Skip <i class="fas fa-arrow-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" id="extractorContainer" style="display: none;">
+        <div class="extractor-header">
+            <button id="backToMainBtn" class="icon-button" title="Back to Scanner">
+                <i class="fas fa-arrow-left"></i> Back
+            </button>
+            <h2>Serial Number Extractor</h2>
+        </div>
+        
+        <div class="extractor-settings">
+            <div class="filename-input">
+                <label for="outputFileName">Output File Name:</label>
+                <input type="text" id="outputFileName" placeholder="Enter file name (without .txt)">
+            </div>
+        </div>
+
+        <div class="scan-section">
+            <div class="scan-input-container">
+                <input type="text" id="extractorInput" placeholder="Scan or enter code...">
+                <button id="extractorScannerBtn" class="icon-button" title="Toggle Scanner">
+                    <i class="fas fa-camera"></i>
+                </button>
+            </div>
+            <div id="extractorReader" style="display: none;"></div>
+        </div>
+
+        <div class="extracted-numbers">
+            <h3>Extracted Serial Numbers <button id="exportBtn" class="action-button" disabled><i class="fas fa-file-export"></i> Export</button></h3>
+            <div id="serialNumbersList" class="serial-numbers-list">
+                <!-- Serial numbers will be listed here -->
             </div>
         </div>
     </div>

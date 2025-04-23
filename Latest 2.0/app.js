@@ -21,6 +21,10 @@ let currentSession = '';
 // Add a new array to store scan progress for each item
 let itemsProgress = [];
 
+// Add variables for serial number extractor
+let extractedSerialNumbers = [];
+let extractorScannerInstance = null;
+
 // Check if user is on mobile device
 fetch('/check-mobile')
     .then(response => response.json())
@@ -82,6 +86,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Auto-focus the scan input
     scanInput.focus();
+
+    // Add event listeners for extractor mode
+    document.getElementById('extractModeBtn').addEventListener('click', toggleExtractorMode);
+    document.getElementById('backToMainBtn').addEventListener('click', toggleExtractorMode);
+    document.getElementById('extractorInput').addEventListener('keydown', handleExtractorScan);
+    document.getElementById('extractorScannerBtn').addEventListener('click', toggleExtractorScanner);
+    document.getElementById('exportBtn').addEventListener('click', exportSerialNumbers);
 });
 
 // Function to check if user is on mobile and check for existing Excel
@@ -292,6 +303,14 @@ function extractPartNumber(input) {
     else if (input.length === 7) {
         return input;
     }
+    // Case 5: 12345672022 (11 characters - first 7 digits are part number)
+    else if (input.length === 11) {
+        return input.substring(0, 7);
+    }
+    // Case 6: 12345672022X (12 characters - first 7 digits are part number)
+    else if (input.length === 12) {
+        return input.substring(0, 7);
+    }
     return null;
 }
 
@@ -310,6 +329,14 @@ function extractSerialNumber(input) {
     }
     // Case 4: 1234567 -> return as is
     else if (input.length === 7) {
+        return input;
+    }
+    // Case 5: 12345672022 -> return full number
+    else if (input.length === 11) {
+        return input;
+    }
+    // Case 6: 12345672022X -> return full number
+    else if (input.length === 12) {
         return input;
     }
     return null;
@@ -728,4 +755,206 @@ function fetchSessions() {
 // Function to download a specific session
 function downloadSession(sessionName) {
     window.location.href = `/download-session/${sessionName}`;
+}
+
+// Function to toggle between main scanner and extractor mode
+function toggleExtractorMode() {
+    const mainContainer = document.getElementById('mainContainer');
+    const extractorContainer = document.getElementById('extractorContainer');
+    
+    if (mainContainer.style.display !== 'none') {
+        // Switch to extractor mode
+        mainContainer.style.display = 'none';
+        extractorContainer.style.display = 'block';
+        document.getElementById('extractorInput').focus();
+        // Reset extractor state
+        extractedSerialNumbers = [];
+        updateSerialNumbersList();
+        document.getElementById('outputFileName').value = `serial_numbers_${new Date().toISOString().split('T')[0]}`;
+    } else {
+        // Switch back to main mode
+        mainContainer.style.display = 'block';
+        extractorContainer.style.display = 'none';
+        // Stop extractor scanner if active
+        stopExtractorScanner();
+        document.getElementById('scanInput').focus();
+    }
+}
+
+// Function to handle scans in extractor mode
+function handleExtractorScan(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        const input = event.target;
+        const scannedValue = input.value.trim();
+        
+        // Extract serial number
+        const serialNumber = extractSerialNumber(scannedValue);
+        
+        if (serialNumber) {
+            // Add to list if not duplicate
+            if (!extractedSerialNumbers.includes(serialNumber)) {
+                extractedSerialNumbers.push(serialNumber);
+                updateSerialNumbersList();
+            }
+            input.value = '';
+        } else {
+            highlightError(input);
+            playErrorSound();
+        }
+        
+        input.focus();
+    }
+}
+
+// Function to update the list of extracted serial numbers
+function updateSerialNumbersList() {
+    const list = document.getElementById('serialNumbersList');
+    const exportBtn = document.getElementById('exportBtn');
+    
+    list.innerHTML = '';
+    extractedSerialNumbers.forEach((number, index) => {
+        const item = document.createElement('div');
+        item.className = 'serial-number-item';
+        item.innerHTML = `
+            <span>${index + 1}. ${number}</span>
+            <button class="remove-btn" data-index="${index}">
+                <i class="fas fa-times"></i>
+            </button>
+        `;
+        
+        // Add remove button handler
+        item.querySelector('.remove-btn').addEventListener('click', () => {
+            extractedSerialNumbers.splice(index, 1);
+            updateSerialNumbersList();
+        });
+        
+        list.appendChild(item);
+    });
+    
+    // Enable/disable export button
+    exportBtn.disabled = extractedSerialNumbers.length === 0;
+}
+
+// Function to toggle the extractor scanner
+function toggleExtractorScanner() {
+    const readerDiv = document.getElementById('extractorReader');
+    const toggleButton = document.getElementById('extractorScannerBtn');
+
+    if (!extractorScannerInstance) {
+        // Start scanner
+        readerDiv.style.display = 'block';
+        toggleButton.classList.add('active');
+        
+        extractorScannerInstance = new Html5Qrcode("extractorReader");
+        const config = {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+        };
+
+        extractorScannerInstance.start(
+            { facingMode: "environment" },
+            config,
+            handleExtractorScanSuccess,
+            onScanError
+        )
+        .then(() => {
+            console.log("Extractor scanner started successfully");
+        })
+        .catch((err) => {
+            console.error("Error starting extractor scanner:", err);
+            alert("Could not start camera scanner. Please check camera permissions.");
+            stopExtractorScanner();
+        });
+    } else {
+        stopExtractorScanner();
+    }
+}
+
+// Function to stop the extractor scanner
+function stopExtractorScanner() {
+    if (extractorScannerInstance) {
+        extractorScannerInstance.stop()
+            .then(() => {
+                console.log('Extractor scanner stopped');
+                document.getElementById('extractorReader').style.display = 'none';
+                document.getElementById('extractorScannerBtn').classList.remove('active');
+                extractorScannerInstance = null;
+            })
+            .catch((err) => {
+                console.error('Error stopping extractor scanner:', err);
+            });
+    }
+}
+
+// Function to handle successful scans in extractor mode
+function handleExtractorScanSuccess(decodedText, decodedResult) {
+    // Stop scanning after successful scan
+    stopExtractorScanner();
+    
+    // Set the scanned value to the input
+    const extractorInput = document.getElementById('extractorInput');
+    extractorInput.value = decodedText;
+    
+    // Trigger the scan handling
+    extractorInput.dispatchEvent(new KeyboardEvent('keydown', {
+        key: 'Enter',
+        code: 'Enter',
+        keyCode: 13,
+        which: 13,
+        bubbles: true
+    }));
+}
+
+// Function to export serial numbers
+async function exportSerialNumbers() {
+    if (extractedSerialNumbers.length === 0) return;
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const sessionName = `session_${timestamp}_serial_extractor`;
+    
+    try {
+        // First, try to save the serial numbers
+        const saveResponse = await fetch('/save-extracted-serials', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                sessionName: sessionName,
+                serialNumbers: extractedSerialNumbers
+            })
+        });
+
+        if (!saveResponse.ok) {
+            const errorData = await saveResponse.json();
+            throw new Error(errorData.error || 'Failed to save serial numbers');
+        }
+
+        // If save was successful, try to download
+        const downloadResponse = await fetch(`/download-session/${sessionName}`);
+        if (!downloadResponse.ok) {
+            throw new Error('Failed to download file');
+        }
+
+        // Create a blob from the response and trigger download
+        const blob = await downloadResponse.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${sessionName}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        // Clear the list after successful export
+        extractedSerialNumbers = [];
+        updateSerialNumbersList();
+        
+    } catch (error) {
+        console.error('Error exporting serial numbers:', error);
+        alert(`Error exporting serial numbers: ${error.message}`);
+    }
 } 

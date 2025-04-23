@@ -475,6 +475,31 @@ app.get('/download-excel', (req, res) => {
     }
 });
 
+// Endpoint to save extracted serial numbers
+app.post('/save-extracted-serials', express.json(), (req, res) => {
+    try {
+        const { sessionName, serialNumbers } = req.body;
+        if (!sessionName || !serialNumbers || !Array.isArray(serialNumbers)) {
+            return res.status(400).json({ error: 'Invalid input data' });
+        }
+
+        // Create session folder
+        const sessionFolder = path.join(scansDir, sessionName);
+        if (!fs.existsSync(sessionFolder)) {
+            fs.mkdirSync(sessionFolder, { recursive: true });
+        }
+
+        // Create a single file for all extracted serial numbers
+        const filePath = path.join(sessionFolder, 'extracted_serial_numbers.txt');
+        fs.writeFileSync(filePath, serialNumbers.join('\n'));
+
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error saving extracted serial numbers:', error);
+        res.status(500).json({ error: 'Failed to save serial numbers: ' + error.message });
+    }
+});
+
 // Serve static files from the current directory
 app.use(express.static(__dirname));
 
