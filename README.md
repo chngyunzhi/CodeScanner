@@ -8,7 +8,7 @@ check your tunnel password in : **https://loca.lt/mytunnelpassword**
 3. Navigate to your project folder
 
       use the **cd** command, For example: cd C:\Users\YourName\Desktop\project-folder
-4. Run the the install command
+4. Run the following command
       
       **npm install**
 5. Click **start.bat**
