@@ -211,6 +211,7 @@ function handleFileUpload(event) {
 
         // Show loading state
         document.getElementById('itemCode').textContent = 'Loading...';
+        document.getElementById('company').textContent = 'Loading...';
         document.getElementById('partNumber').textContent = 'Loading...';
         document.getElementById('scansLeft').textContent = 'Loading...';
 
@@ -263,6 +264,7 @@ function displayCurrentItem() {
     
     const currentItem = allItems[currentItemIndex];
     document.getElementById('itemCode').textContent = currentItem.itemCode || 'N/A';
+    document.getElementById('company').textContent = currentItem.company || 'N/A';
     document.getElementById('partNumber').textContent = currentItem.partNumber || 'N/A';
     document.getElementById('scansLeft').textContent = itemsProgress[currentItemIndex].scansRemaining || '0';
     currentPartNumber = currentItem.partNumber;

@@ -314,28 +314,25 @@ app.post('/upload', upload.single('file'), (req, res) => {
                 .filter(line => line.trim() !== '')
                 .map(line => {
                     const columns = line.split(',');
-                    // Assuming CSV has same structure: Column C (index 2) - Item Code, D (3) - Part Number, E (4) - Pcs
+                    // Company: Column A (index 0)
+                    // Item Code: Column C (index 2)
+                    // Part Number: Column D (index 3)
+                    // Pcs: Column E (index 4)
+                    const company = columns[0] ? columns[0].trim() : '';
                     const itemCode = columns[2] ? columns[2].trim() : '';
                     const partNumber = columns[3] ? columns[3].trim() : '';
                     const pc = columns[4] ? columns[4].trim() : '0';
                     
-                    // Clean the part number by removing 'P/N' and any surrounding spaces
                     const cleanPartNumber = partNumber.toString().replace(/P\/N\s*:?\s*/i, '').trim();
                     
-                    console.log('Processing CSV row:', {
-                        itemCode: itemCode,
-                        partNumber: partNumber,
-                        cleanPartNumber: cleanPartNumber,
-                        pc: pc
-                    });
-                    
                     return {
+                        company: company,
                         itemCode: itemCode,
                         partNumber: cleanPartNumber,
                         scansRequired: parseInt(pc) || 0
                     };
                 })
-                .filter(item => item.itemCode && item.scansRequired > 0); // Only include items with codes and scans required
+                .filter(item => item.itemCode && item.scansRequired > 0);
         } else {
             // Process Excel file
             const workbook = xlsx.readFile(filePath);
@@ -361,27 +358,25 @@ app.post('/upload', upload.single('file'), (req, res) => {
                 .slice(1) // Skip first row
                 .filter(row => row[2] && row[2].toString().trim() !== '') // Check if Item Code exists
                 .map(row => {
-                    const itemCode = row[3] || '';    // Column C - Item Code
-                    const partNumber = row[2] || '';  // Column D - Part Number
-                    const pc = row[4] || '0';         // Column E - Pcs
+                    // Company: Column A (index 0)
+                    // Part Number: Column C (index 2)
+                    // Item Code: Column D (index 3)
+                    // Pcs: Column E (index 4)
+                    const company = row[0] || '';
+                    const partNumber = row[2] || '';
+                    const itemCode = row[3] || '';
+                    const pc = row[4] || '0';
                     
-                    // Clean the part number by removing 'P/N' and any surrounding spaces
                     const cleanPartNumber = partNumber.toString().replace(/P\/N\s*:?\s*/i, '').trim();
                     
-                    console.log('Processing Excel row:', {
-                        itemCode: itemCode,
-                        partNumber: partNumber,
-                        cleanPartNumber: cleanPartNumber,
-                        pc: pc
-                    });
-
                     return {
+                        company: company,
                         itemCode: itemCode,
                         partNumber: cleanPartNumber,
                         scansRequired: parseInt(pc) || 0
                     };
                 })
-                .filter(item => item.scansRequired > 0); // Only include items with scans required
+                .filter(item => item.scansRequired > 0);
         }
         
         console.log('Processed items:', processedItems);
