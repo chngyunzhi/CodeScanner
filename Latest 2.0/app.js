@@ -158,9 +158,20 @@ async function useSharedExcelData() {
             // Update the upload section
             const uploadSection = document.querySelector('.upload-section');
             uploadSection.innerHTML = `
-                <p>Using shared Excel data. Uploaded: ${new Date(data.timestamp).toLocaleString()}</p>
-                <p>Total items: ${allItems.length}</p>
+                <div class="current-session-info">
+                    <p><strong>Active File:</strong> ${data.originalFileName}</p>
+                    <p><strong>Session:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
+                    <p><strong>Items:</strong> ${allItems.length}</p>
+                </div>
+                <button id="uploadAnotherBtn" class="action-button">Upload Another File</button>
+                <button id="viewSessions" class="action-button secondary">View Previous Sessions</button>
+                <div id="uploadedItemsTableContainer"></div>
             `;
+            document.getElementById('uploadAnotherBtn').addEventListener('click', function() {
+                document.getElementById('fileInput').click();
+            });
+            document.getElementById('viewSessions').addEventListener('click', showSessionsModal);
+            renderUploadedItemsTable(allItems);
             
             console.log('Shared data loaded successfully. Items:', allItems);
         }
@@ -242,11 +253,15 @@ function handleFileUpload(event) {
                         <p><strong>Session:</strong> ${new Date(data.timestamp).toLocaleString()}</p>
                         <p><strong>Items:</strong> ${allItems.length}</p>
                     </div>
+                    <button id="uploadAnotherBtn" class="action-button">Upload Another File</button>
                     <button id="viewSessions" class="action-button secondary">View Previous Sessions</button>
+                    <div id="uploadedItemsTableContainer"></div>
                 `;
-                
-                // Add listener for the view sessions button
+                document.getElementById('uploadAnotherBtn').addEventListener('click', function() {
+                    document.getElementById('fileInput').click();
+                });
                 document.getElementById('viewSessions').addEventListener('click', showSessionsModal);
+                renderUploadedItemsTable(allItems);
             } else {
                 alert('No items found in the Excel file');
             }
@@ -297,21 +312,25 @@ function extractPartNumber(input) {
     else if (input.length === 20 && input.includes('pid.sick.com/')) {
         return input.split('/')[1];
     }
-    // Case 3: 104631522440725 (15 characters - first 7 digits)
+    // Case 3: http://pid.sick.com/1234567 (27 characters - last 7 digits are part number)
+    else if (input.length === 27 && input.includes('http://pid.sick.com/')) {
+        return input.split('/')[3];
+    }
+    // Case 4: 104631522440725 (15 characters - first 7 digits)
     else if (input.length === 15) {
         return input.substring(0, 7);
     }
-    // Case 4: 1234567 (7 characters)
+    // Case 5: 1234567 (7 characters)
     else if (input.length === 7) {
         return input;
     }
-    // Case 5: 12345672022 (11 characters - first 7 digits are part number)
+    // Case 6: 12345672022 (11 characters - first 7 digits are part number)
     else if (input.length === 11) {
         return input.substring(0, 7);
     }
-    // Case 6: 12345672022X (12 characters - first 7 digits are part number)
+    // Case 7: 12345672022X (12 characters - first 7 digits are part number)
     else if (input.length === 12) {
-        return input.substring(0, 7);
+        return input.substring(0, 7);      
     }
     return null;
 }
@@ -325,27 +344,26 @@ function extractSerialNumber(input) {
     else if (input.length === 20 && input.includes('pid.sick.com/')) {
         return input.split('/')[1];
     }
-    // Case 3: 104631522440725 -> extract last 8 digits (22440725)
+    // Case 3: http://pid.sick.com/1234567 -> extract 1234567
+    else if (input.length === 27 && input.includes('http://pid.sick.com/')) {
+        return input.split('/')[3];
+    }
+    // Case 4: 104631522440725 -> extract last 8 digits (22440725)
     else if (input.length === 15) {
         return input.slice(-8);
     }
-    // Case 4: 1234567 -> return as is
+    // Case 5: 1234567 -> return as is
     else if (input.length === 7) {
         return input;
     }
-    // Case 5: 12345672022 -> return full number
+    // Case 6: 12345672022 -> return full number
     else if (input.length === 11) {
         return input;
     }
-    // Case 6: 12345672022X -> return full number
+    // Case 7: 12345672022X -> return full number
     else if (input.length === 12) {
         return input;
     }
-    // Case 7: http://pid.sick.com/1234567 -> extract 1234567
-    else if (input.length === 27 && input.includes('pid.sick.com/')) {
-        return input.split('/')[1];
-    }
-    return null;
 }
 
 function handleScan(event) {
@@ -404,6 +422,7 @@ function handleScan(event) {
 }
 
 async function saveScan(serialNumber) {
+    if (!serialNumber) return; // Only save if serial number is present
     try {
         const currentItem = allItems[currentItemIndex];
         const response = await fetch('/save-scan', {
@@ -807,6 +826,7 @@ function handleExtractorScan(event) {
         } else {
             highlightError(input);
             playErrorSound();
+            alert('No serial number found in the scanned input. Please scan a valid code containing a serial number.');
         }
         
         input.focus();
@@ -963,4 +983,34 @@ async function exportSerialNumbers() {
         console.error('Error exporting serial numbers:', error);
         alert(`Error exporting serial numbers: ${error.message}`);
     }
+}
+
+// Add this function at the end of the file or after handleFileUpload
+function renderUploadedItemsTable(items) {
+    const container = document.getElementById('uploadedItemsTableContainer');
+    if (!container) return;
+    if (!items || items.length === 0) {
+        container.innerHTML = '<p>No items to display.</p>';
+        return;
+    }
+    let tableHtml = `<div style="overflow-x:auto;"><table class="uploaded-items-table" style="width:100%;border-collapse:collapse;margin-top:20px;">
+        <thead>
+            <tr>
+                <th style='padding:8px;border-bottom:1px solid #ccc;'>Item Code</th>
+                <th style='padding:8px;border-bottom:1px solid #ccc;'>Company</th>
+                <th style='padding:8px;border-bottom:1px solid #ccc;'>Part Number</th>
+                <th style='padding:8px;border-bottom:1px solid #ccc;'>Quantity</th>
+            </tr>
+        </thead>
+        <tbody>`;
+    items.forEach(item => {
+        tableHtml += `<tr>
+            <td style='padding:8px;border-bottom:1px solid #eee;'>${item.itemCode || ''}</td>
+            <td style='padding:8px;border-bottom:1px solid #eee;'>${item.company || ''}</td>
+            <td style='padding:8px;border-bottom:1px solid #eee;'>${item.partNumber || ''}</td>
+            <td style='padding:8px;border-bottom:1px solid #eee;'>${item.scansRequired || ''}</td>
+        </tr>`;
+    });
+    tableHtml += `</tbody></table></div>`;
+    container.innerHTML = tableHtml;
 } 
