@@ -341,6 +341,10 @@ function extractSerialNumber(input) {
     else if (input.length === 12) {
         return input;
     }
+    // Case 7: http://pid.sick.com/1234567 -> extract 1234567
+    else if (input.length === 27 && input.includes('pid.sick.com/')) {
+        return input.split('/')[1];
+    }
     return null;
 }
 
