@@ -12,6 +12,9 @@
     <div class="header">
         <h1><i class="fas fa-barcode"></i> Item Scanner</h1>
         <div class="header-buttons">
+            <button id="stockTakeBtn" class="icon-button" title="Stock Take Tools">
+                <i class="fas fa-clipboard-list"></i>
+            </button>
             <button id="extractModeBtn" class="icon-button" title="Serial Number Extractor">
                 <i class="fas fa-tools"></i>
             </button>
@@ -60,6 +63,30 @@
             <div class="navigation-buttons">
                 <button id="backButton" disabled><i class="fas fa-arrow-left"></i> Back</button>
                 <button id="skipButton" disabled>Skip <i class="fas fa-arrow-right"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" id="stockTakeContainer" style="display: none;">
+        <div class="extractor-header">
+            <button id="backToMainFromStockTakeBtn" class="icon-button" title="Back to Scanner">
+                <i class="fas fa-arrow-left"></i> Back
+            </button>
+            <h2>Stock Take Tools</h2>
+        </div>
+        <div class="upload-section" id="stockTakeUploadSection">
+            <input type="file" id="stockTakeFileInput" accept=".xlsx,.xls,.csv" style="display: none;">
+            <p>Click to upload Stock Take file or drag and drop here</p>
+        </div>
+        <div id="stockTakeTableContainer">
+            <!-- Stock take table will be rendered here -->
+        </div>
+        <div class="scan-section">
+            <div class="scan-input-container">
+                <input type="text" id="stockTakeScanInput" placeholder="Scan item to check off...">
+                <button id="stockTakeScannerBtn" class="icon-button" title="Toggle Scanner">
+                    <i class="fas fa-camera"></i>
+                </button>
             </div>
         </div>
     </div>

@@ -7,6 +7,9 @@ let isMobileDevice = false;
 // Add error sound
 const errorSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
 
+// Add success sound
+const successSound = new Audio('https://assets.mixkit.co/active_storage/sfx/4227/4227-preview.mp3');
+
 // Add variable to track modal state
 let isNetworkModalOpen = false;
 let networkRefreshInterval = null;
@@ -24,6 +27,10 @@ let itemsProgress = [];
 // Add variables for serial number extractor
 let extractedSerialNumbers = [];
 let extractorScannerInstance = null;
+
+// Add variables for stock take mode
+let stockTakeItems = [];
+let stockTakeScannedCounts = {};
 
 // Check if user is on mobile device
 fetch('/check-mobile')
@@ -93,6 +100,34 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('extractorInput').addEventListener('keydown', handleExtractorScan);
     document.getElementById('extractorScannerBtn').addEventListener('click', toggleExtractorScanner);
     document.getElementById('exportBtn').addEventListener('click', exportSerialNumbers);
+
+    // Add event listeners for stock take mode
+    document.getElementById('stockTakeBtn').addEventListener('click', toggleStockTakeMode);
+    document.getElementById('backToMainFromStockTakeBtn').addEventListener('click', toggleStockTakeMode);
+    document.getElementById('stockTakeFileInput').addEventListener('change', handleStockTakeUpload);
+    document.getElementById('stockTakeScanInput').addEventListener('keydown', handleStockTakeScan);
+    document.getElementById('stockTakeScannerBtn').addEventListener('click', toggleStockTakeScanner);
+    
+    // Add drag and drop for stock take file upload
+    const stockTakeUploadSection = document.getElementById('stockTakeUploadSection');
+    stockTakeUploadSection.addEventListener('click', () => document.getElementById('stockTakeFileInput').click());
+    stockTakeUploadSection.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        stockTakeUploadSection.classList.add('drag-over');
+    });
+    stockTakeUploadSection.addEventListener('dragleave', () => {
+        stockTakeUploadSection.classList.remove('drag-over');
+    });
+    stockTakeUploadSection.addEventListener('drop', (e) => {
+        e.preventDefault();
+        stockTakeUploadSection.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) {
+            const fileInput = document.getElementById('stockTakeFileInput');
+            fileInput.files = e.dataTransfer.files;
+            handleStockTakeUpload({ target: fileInput });
+        }
+    });
 });
 
 // Function to check if user is on mobile and check for existing Excel
@@ -364,6 +399,8 @@ function extractSerialNumber(input) {
     else if (input.length === 12) {
         return input;
     }
+
+    return null;
 }
 
 function handleScan(event) {
@@ -422,7 +459,6 @@ function handleScan(event) {
 }
 
 async function saveScan(serialNumber) {
-    if (!serialNumber) return; // Only save if serial number is present
     try {
         const currentItem = allItems[currentItemIndex];
         const response = await fetch('/save-scan', {
@@ -826,7 +862,6 @@ function handleExtractorScan(event) {
         } else {
             highlightError(input);
             playErrorSound();
-            alert('No serial number found in the scanned input. Please scan a valid code containing a serial number.');
         }
         
         input.focus();
@@ -1013,4 +1048,196 @@ function renderUploadedItemsTable(items) {
     });
     tableHtml += `</tbody></table></div>`;
     container.innerHTML = tableHtml;
-} 
+}
+
+// ----- STOCK TAKE FUNCTIONS -----
+
+function toggleStockTakeMode() {
+    const mainContainer = document.getElementById('mainContainer');
+    const extractorContainer = document.getElementById('extractorContainer');
+    const stockTakeContainer = document.getElementById('stockTakeContainer');
+
+    if (stockTakeContainer.style.display !== 'none') {
+        // Switch back to main mode
+        mainContainer.style.display = 'grid';
+        extractorContainer.style.display = 'none';
+        stockTakeContainer.style.display = 'none';
+        document.getElementById('scanInput').focus();
+    } else {
+        // Switch to stock take mode
+        mainContainer.style.display = 'none';
+        extractorContainer.style.display = 'none';
+        stockTakeContainer.style.display = 'block';
+        document.getElementById('stockTakeScanInput').focus();
+        // Clear previous state
+        stockTakeItems = [];
+        stockTakeScannedCounts = {};
+        renderStockTakeTable();
+    }
+}
+
+function handleStockTakeUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    fetch('/upload-stock-take', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        stockTakeItems = data.items.map(item => ({ ...item, scanned: 0 }));
+        stockTakeScannedCounts = {}; // Reset counts
+        renderStockTakeTable();
+        document.getElementById('stockTakeScanInput').focus();
+    })
+    .catch(error => {
+        console.error('Error uploading stock take file:', error);
+        alert('Failed to upload or process stock take file.');
+    });
+}
+
+function renderStockTakeTable() {
+    const container = document.getElementById('stockTakeTableContainer');
+    if (stockTakeItems.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    let tableHtml = `
+        <div id="stockTakeErrorMsg" style="color:#e53e3e;margin-bottom:10px;"></div>
+        <table class="stock-take-table">
+            <thead>
+                <tr>
+                    <th>Part Number</th>
+                    <th>Scanned / Quantity</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    stockTakeItems.forEach((item, index) => {
+        tableHtml += `
+            <tr id="stock-item-row-${index}">
+                <td>${item.partNumber}</td>
+                <td>${item.scanned} / ${item.quantity}</td>
+                <td>
+                    <button class="remove-stock-item-btn" data-index="${index}" title="Remove Item">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+    tableHtml += '</tbody></table>';
+    container.innerHTML = tableHtml;
+
+    // Add event listeners for remove buttons
+    document.querySelectorAll('.remove-stock-item-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            const indexToRemove = parseInt(event.currentTarget.getAttribute('data-index'), 10);
+            stockTakeItems.splice(indexToRemove, 1);
+            renderStockTakeTable();
+        });
+    });
+}
+
+function handleStockTakeScan(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        const scanInput = event.target;
+        const userInput = scanInput.value.trim();
+        const scannedPartNumber = extractPartNumber(userInput);
+        const errorMsgDiv = document.getElementById('stockTakeErrorMsg');
+        if (errorMsgDiv) errorMsgDiv.textContent = '';
+        if (!scannedPartNumber) {
+            highlightError(scanInput);
+            playErrorSound();
+            if (errorMsgDiv) errorMsgDiv.textContent = 'item not found';
+            scanInput.value = '';
+            scanInput.focus();
+            return;
+        }
+        const itemIndex = stockTakeItems.findIndex(item => item.partNumber === scannedPartNumber);
+        if (itemIndex !== -1) {
+            const item = stockTakeItems[itemIndex];
+            if (item.scanned < item.quantity) {
+                item.scanned++;
+                successSound.currentTime = 0;
+                successSound.play().catch(() => {});
+                // Remove item if done
+                if (item.scanned >= item.quantity) {
+                    stockTakeItems.splice(itemIndex, 1);
+                }
+                renderStockTakeTable();
+            } else {
+                playErrorSound();
+                highlightError(scanInput, 500);
+            }
+        } else {
+            highlightError(scanInput);
+            playErrorSound();
+            if (errorMsgDiv) errorMsgDiv.textContent = 'item not found';
+        }
+        scanInput.value = '';
+        scanInput.focus();
+    }
+}
+
+// Camera scanner logic for stock take
+let stockTakeScannerInstance = null;
+function toggleStockTakeScanner() {
+    const scanInput = document.getElementById('stockTakeScanInput');
+    const readerDivId = 'stockTakeReader';
+    let readerDiv = document.getElementById(readerDivId);
+    if (!readerDiv) {
+        readerDiv = document.createElement('div');
+        readerDiv.id = readerDivId;
+        readerDiv.style.marginTop = '10px';
+        document.querySelector('.scan-input-container').appendChild(readerDiv);
+    }
+    if (!stockTakeScannerInstance) {
+        readerDiv.style.display = 'block';
+        stockTakeScannerInstance = new Html5Qrcode(readerDivId);
+        const config = {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+            aspectRatio: 1.0
+        };
+        stockTakeScannerInstance.start(
+            { facingMode: 'environment' },
+            config,
+            (decodedText) => {
+                stopStockTakeScanner();
+                document.getElementById('stockTakeScanInput').value = decodedText;
+                document.getElementById('stockTakeScanInput').dispatchEvent(new KeyboardEvent('keydown', {
+                    key: 'Enter',
+                    code: 'Enter',
+                    keyCode: 13,
+                    which: 13,
+                    bubbles: true
+                }));
+            },
+            (error) => {}
+        ).catch((err) => {
+            alert('Could not start camera scanner. Please check camera permissions.');
+            stopStockTakeScanner();
+        });
+    } else {
+        stopStockTakeScanner();
+    }
+}
+function stopStockTakeScanner() {
+    if (stockTakeScannerInstance) {
+        stockTakeScannerInstance.stop().then(() => {
+            document.getElementById('stockTakeReader').style.display = 'none';
+            stockTakeScannerInstance = null;
+        }).catch(() => {});
+    }
+}
+// ----- END STOCK TAKE FUNCTIONS ----- 

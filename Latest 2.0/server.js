@@ -613,6 +613,51 @@ app.get('/download-session/:sessionName', async (req, res) => {
     }
 });
 
+app.post('/upload-stock-take', upload.single('file'), (req, res) => {
+    try {
+        const filePath = path.join(__dirname, 'uploads', req.file.filename);
+        let items = [];
+        const fileExt = path.extname(req.file.originalname).toLowerCase();
+
+        if (fileExt === '.csv') {
+            const csvData = fs.readFileSync(filePath, 'utf8');
+            const lines = csvData.split('\\n');
+            const dataRows = lines.slice(1); // Skip header
+
+            items = dataRows
+                .filter(line => line.trim() !== '')
+                .map(line => {
+                    const columns = line.split(',');
+                    return {
+                        partNumber: columns[1] ? columns[1].trim() : '',
+                        quantity: parseInt(columns[2] ? columns[2].trim() : '0', 10)
+                    };
+                })
+                .filter(item => item.partNumber && item.quantity > 0);
+        } else { // Handle .xlsx, .xls
+            const workbook = xlsx.readFile(filePath);
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
+            const jsonData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+            items = jsonData
+                .slice(1) // Skip header
+                .map(row => ({
+                    partNumber: row[1] ? row[1].toString().trim() : '',
+                    quantity: parseInt(row[2] ? row[2].toString().trim() : '0', 10)
+                }))
+                .filter(item => item.partNumber && item.quantity > 0);
+        }
+
+        fs.unlinkSync(filePath); // Clean up uploaded file
+        res.json({ items });
+
+    } catch (error) {
+        console.error('Error processing stock take file:', error);
+        res.status(500).json({ error: 'Error processing stock take file' });
+    }
+});
+
 // Start the server
 app.listen(PORT, async () => {
     console.log(`Server running on port ${PORT}`);
