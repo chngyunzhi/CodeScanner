@@ -25,8 +25,15 @@ let currentSession = '';
 let itemsProgress = [];
 
 // Add variables for serial number extractor
-let extractedSerialNumbers = [];
+// let extractedSerialNumbers = [];
+// let extractorScannerInstance = null;
+
+// Refactored: Store serials by part number
+let extractedSerialsByPart = {}; // { partNumber: [serialNumbers] }
 let extractorScannerInstance = null;
+
+// Add a new object to track counts for part numbers without serials
+let extractedNoSerialCount = {}; // { partNumber: count }
 
 // Add variables for stock take mode
 let stockTakeItems = [];
@@ -829,7 +836,8 @@ function toggleExtractorMode() {
         extractorContainer.style.display = 'block';
         document.getElementById('extractorInput').focus();
         // Reset extractor state
-        extractedSerialNumbers = [];
+        extractedSerialsByPart = {};
+        extractedNoSerialCount = {};
         updateSerialNumbersList();
         document.getElementById('outputFileName').value = `serial_numbers_${new Date().toISOString().split('T')[0]}`;
     } else {
@@ -849,52 +857,229 @@ function handleExtractorScan(event) {
         const input = event.target;
         const scannedValue = input.value.trim();
         
-        // Extract serial number
-        const serialNumber = extractSerialNumber(scannedValue);
+        // Check if the scanned data contains a serial number
+        const hasSerialNumber = hasSeparateSerialNumber(scannedValue);
         
-        if (serialNumber) {
-            // Add to list if not duplicate
-            if (!extractedSerialNumbers.includes(serialNumber)) {
-                extractedSerialNumbers.push(serialNumber);
-                updateSerialNumbersList();
+        if (hasSerialNumber) {
+            // Extract both part number and serial number
+            const partNumber = extractPartNumber(scannedValue);
+            const serialNumber = extractSerialNumber(scannedValue);
+            
+            if (partNumber && serialNumber) {
+                if (!extractedSerialsByPart[partNumber]) {
+                    extractedSerialsByPart[partNumber] = [];
+                }
+                // Add to list if not duplicate
+                if (!extractedSerialsByPart[partNumber].includes(serialNumber)) {
+                    extractedSerialsByPart[partNumber].push(serialNumber);
+                    updateSerialNumbersList();
+                }
+            } else {
+                highlightError(input);
+                playErrorSound();
             }
-            input.value = '';
         } else {
-            highlightError(input);
-            playErrorSound();
+            // No serial number in scanned data, but still extract part number for display
+            const partNumber = extractPartNumber(scannedValue);
+            if (partNumber) {
+                if (!extractedNoSerialCount[partNumber]) {
+                    extractedNoSerialCount[partNumber] = 0;
+                }
+                extractedNoSerialCount[partNumber]++;
+                updateSerialNumbersList();
+            } else {
+                highlightError(input);
+                playErrorSound();
+            }
         }
         
+        input.value = '';
         input.focus();
     }
+}
+
+// Function to determine if scanned data contains a separate serial number
+function hasSeparateSerialNumber(input) {
+    // Case 1: pid.sick.com/1138661/23400015 (29 characters) - has separate serial
+    if (input.length === 29 && input.includes('pid.sick.com/')) {
+        return true;
+    }
+    // Case 2: pid.sick.com/1234567 (20 characters) - no separate serial
+    else if (input.length === 20 && input.includes('pid.sick.com/')) {
+        return false;
+    }
+    // Case 3: http://pid.sick.com/1234567 (27 characters) - no separate serial
+    else if (input.length === 27 && input.includes('http://pid.sick.com/')) {
+        return false;
+    }
+    // Case 4: 104631522440725 (15 characters) - has separate serial (last 8 digits)
+    else if (input.length === 15) {
+        return true;
+    }
+    // Case 5: 1234567 (7 characters) - no separate serial
+    else if (input.length === 7) {
+        return false;
+    }
+    // Case 6: 12345672022 (11 characters) - no separate serial
+    else if (input.length === 11) {
+        return false;
+    }
+    // Case 7: 12345672022X (12 characters) - no separate serial
+    else if (input.length === 12) {
+        return false;
+    }
+    
+    return false;
 }
 
 // Function to update the list of extracted serial numbers
 function updateSerialNumbersList() {
     const list = document.getElementById('serialNumbersList');
     const exportBtn = document.getElementById('exportBtn');
-    
     list.innerHTML = '';
-    extractedSerialNumbers.forEach((number, index) => {
-        const item = document.createElement('div');
-        item.className = 'serial-number-item';
-        item.innerHTML = `
-            <span>${index + 1}. ${number}</span>
-            <button class="remove-btn" data-index="${index}">
-                <i class="fas fa-times"></i>
-            </button>
-        `;
-        
-        // Add remove button handler
-        item.querySelector('.remove-btn').addEventListener('click', () => {
-            extractedSerialNumbers.splice(index, 1);
+    // Sort parts by name for consistent display
+    const sortedParts = Object.keys(extractedSerialsByPart).sort();
+    const sortedNoSerialParts = Object.keys(extractedNoSerialCount).sort();
+    if (sortedParts.length === 0 && sortedNoSerialParts.length === 0) {
+        exportBtn.disabled = true;
+        return;
+    }
+    // Render parts with serials
+    sortedParts.forEach(partNumber => {
+        const serialNumbers = extractedSerialsByPart[partNumber];
+        // Create container for this part
+        const partItem = document.createElement('div');
+        partItem.className = 'serial-number-part-item';
+        // Collapsed state
+        let expanded = false;
+        // Header row
+        const header = document.createElement('div');
+        header.className = 'part-header';
+        // Triangle (expand/collapse)
+        const triangle = document.createElement('span');
+        triangle.className = 'triangle';
+        triangle.innerHTML = '&#9654;'; // right-pointing triangle
+        triangle.style.cursor = 'pointer';
+        // Download icon
+        const downloadBtn = document.createElement('button');
+        downloadBtn.className = 'download-btn';
+        downloadBtn.title = 'Download serials for this part';
+        downloadBtn.innerHTML = '<i class="fas fa-download"></i>';
+        downloadBtn.style.marginLeft = '8px';
+        // Part number label
+        const partLabel = document.createElement('span');
+        partLabel.className = 'part-label';
+        partLabel.textContent = partNumber;
+        partLabel.style.marginLeft = '8px';
+        // Scanned quantity
+        const qty = document.createElement('span');
+        qty.className = 'scanned-qty';
+        qty.textContent = `(${serialNumbers.length} scanned)`;
+        qty.style.marginLeft = '8px';
+        // Remove all button
+        const removeAllBtn = document.createElement('button');
+        removeAllBtn.className = 'remove-all-btn';
+        removeAllBtn.title = 'Remove All';
+        removeAllBtn.innerHTML = '<i class="fas fa-times"></i>';
+        removeAllBtn.style.marginLeft = '8px';
+        // Header assembly
+        header.appendChild(triangle);
+        header.appendChild(downloadBtn);
+        header.appendChild(partLabel);
+        header.appendChild(qty);
+        header.appendChild(removeAllBtn);
+        partItem.appendChild(header);
+        // Serial numbers list (hidden by default)
+        const serialsListDiv = document.createElement('div');
+        serialsListDiv.className = 'serial-numbers-list-container';
+        serialsListDiv.style.display = 'none';
+        serialNumbers.forEach((number, index) => {
+            const item = document.createElement('div');
+            item.className = 'serial-number-item';
+            item.innerHTML = `
+                <span>${index + 1}. ${number}</span>
+                <button class="remove-btn" data-index="${index}" data-part="${partNumber}" title="Remove">
+                    <i class="fas fa-times"></i>
+                </button>
+            `;
+            // Remove button handler
+            item.querySelector('.remove-btn').addEventListener('click', () => {
+                extractedSerialsByPart[partNumber].splice(index, 1);
+                if (extractedSerialsByPart[partNumber].length === 0) {
+                    delete extractedSerialsByPart[partNumber];
+                }
+                updateSerialNumbersList();
+            });
+            serialsListDiv.appendChild(item);
+        });
+        partItem.appendChild(serialsListDiv);
+        // Expand/collapse handler
+        triangle.addEventListener('click', () => {
+            expanded = !expanded;
+            serialsListDiv.style.display = expanded ? 'block' : 'none';
+            triangle.innerHTML = expanded ? '&#9660;' : '&#9654;'; // down or right triangle
+        });
+        // Download handler
+        downloadBtn.addEventListener('click', () => {
+            downloadSerialsForPart(partNumber, serialNumbers);
+        });
+        // Remove all handler
+        removeAllBtn.addEventListener('click', () => {
+            delete extractedSerialsByPart[partNumber];
             updateSerialNumbersList();
         });
-        
-        list.appendChild(item);
+        list.appendChild(partItem);
     });
-    
-    // Enable/disable export button
-    exportBtn.disabled = extractedSerialNumbers.length === 0;
+    // Render parts with only counts (no serials)
+    sortedNoSerialParts.forEach(partNumber => {
+        // If this part also has serials, skip (already rendered above)
+        if (extractedSerialsByPart[partNumber]) return;
+        const count = extractedNoSerialCount[partNumber];
+        const partItem = document.createElement('div');
+        partItem.className = 'serial-number-part-item no-serial';
+        // Just show part number and count, no expand/collapse or download
+        const header = document.createElement('div');
+        header.className = 'part-header';
+        const partLabel = document.createElement('span');
+        partLabel.className = 'part-label';
+        partLabel.textContent = partNumber;
+        partLabel.style.marginLeft = '8px';
+        const qty = document.createElement('span');
+        qty.className = 'scanned-qty';
+        qty.textContent = `(${count} scanned)`;
+        qty.style.marginLeft = '8px';
+        // Remove all button
+        const removeAllBtn = document.createElement('button');
+        removeAllBtn.className = 'remove-all-btn';
+        removeAllBtn.title = 'Remove All';
+        removeAllBtn.innerHTML = '<i class="fas fa-times"></i>';
+        removeAllBtn.style.marginLeft = '8px';
+        removeAllBtn.addEventListener('click', () => {
+            delete extractedNoSerialCount[partNumber];
+            updateSerialNumbersList();
+        });
+        header.appendChild(partLabel);
+        header.appendChild(qty);
+        header.appendChild(removeAllBtn);
+        partItem.appendChild(header);
+        list.appendChild(partItem);
+    });
+    // Enable/disable export button (only if there are serials to export)
+    exportBtn.disabled = Object.keys(extractedSerialsByPart).length === 0;
+}
+
+// Helper: Download serials for a part as a text file
+function downloadSerialsForPart(partNumber, serialNumbers) {
+    const content = serialNumbers.join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${partNumber}_serials.txt`;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
 }
 
 // Function to toggle the extractor scanner
@@ -970,7 +1155,7 @@ function handleExtractorScanSuccess(decodedText, decodedResult) {
 
 // Function to export serial numbers
 async function exportSerialNumbers() {
-    if (extractedSerialNumbers.length === 0) return;
+    if (Object.keys(extractedSerialsByPart).length === 0) return;
     
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const sessionName = `session_${timestamp}_serial_extractor`;
@@ -984,7 +1169,7 @@ async function exportSerialNumbers() {
             },
             body: JSON.stringify({
                 sessionName: sessionName,
-                serialNumbers: extractedSerialNumbers
+                serialNumbersByPart: extractedSerialsByPart
             })
         });
 
@@ -1011,7 +1196,7 @@ async function exportSerialNumbers() {
         document.body.removeChild(a);
         
         // Clear the list after successful export
-        extractedSerialNumbers = [];
+        extractedSerialsByPart = {};
         updateSerialNumbersList();
         
     } catch (error) {
