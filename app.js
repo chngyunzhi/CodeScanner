@@ -114,6 +114,38 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('stockTakeFileInput').addEventListener('change', handleStockTakeUpload);
     document.getElementById('stockTakeScanInput').addEventListener('keydown', handleStockTakeScan);
     document.getElementById('stockTakeScannerBtn').addEventListener('click', toggleStockTakeScanner);
+    document.getElementById('keyInManuallyBtn').addEventListener('click', showManualInputModal);
+    document.getElementById('saveStockTakeBtn').addEventListener('click', saveStockTakeProgress);
+    document.getElementById('loadStockTakeBtn').addEventListener('click', showLoadStockTakeModal);
+    document.getElementById('confirmManualInput').addEventListener('click', confirmManualInput);
+    document.getElementById('closeManualModal').addEventListener('click', closeManualInputModal);
+    document.getElementById('closeLoadModal').addEventListener('click', closeLoadStockTakeModal);
+    
+    // Allow Enter key in manual input fields
+    document.getElementById('manualPartNumber').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('manualQuantity').focus();
+        }
+    });
+    document.getElementById('manualQuantity').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            confirmManualInput();
+        }
+    });
+    
+    // Close modals when clicking outside
+    document.getElementById('manualInputModal').addEventListener('click', function(event) {
+        if (event.target === this) {
+            closeManualInputModal();
+        }
+    });
+    document.getElementById('loadStockTakeModal').addEventListener('click', function(event) {
+        if (event.target === this) {
+            closeLoadStockTakeModal();
+        }
+    });
     
     // Add drag and drop for stock take file upload
     const stockTakeUploadSection = document.getElementById('stockTakeUploadSection');
@@ -346,16 +378,21 @@ function displayCurrentItem() {
 }
 
 function extractPartNumber(input) {
+    const lowerInput = input.toLowerCase(); // Normalize for comparison
     // Case 1: pid.sick.com/1138661/23400015 (29 characters)
-    if (input.length === 29 && input.includes('pid.sick.com/')) {
+    if (input.length === 29 && lowerInput.includes('pid.sick.com/')) {
+        return input.split('/')[1];
+    }
+    // Case 8: pid.sick.com/1138661/234000150 (30 characters) (additional 1 digit)
+    else if (input.length === 30 && lowerInput.includes('pid.sick.com/')) {
         return input.split('/')[1];
     }
     // Case 2: pid.sick.com/1234567 (20 characters)
-    else if (input.length === 20 && input.includes('pid.sick.com/')) {
+    else if (input.length === 20 && lowerInput.includes('pid.sick.com/')) {
         return input.split('/')[1];
     }
     // Case 3: http://pid.sick.com/1234567 (27 characters - last 7 digits are part number)
-    else if (input.length === 27 && input.includes('http://pid.sick.com/')) {
+    else if (input.length === 27 && lowerInput.includes('http://pid.sick.com/')) {
         return input.split('/')[3];
     }
     // Case 4: 104631522440725 (15 characters - first 7 digits)
@@ -378,16 +415,21 @@ function extractPartNumber(input) {
 }
 
 function extractSerialNumber(input) {
+    const lowerInput = input.toLowerCase(); // Normalize for comparison
     // Case 1: pid.sick.com/1138661/23400015 -> extract 23400015
-    if (input.length === 29 && input.includes('pid.sick.com/')) {
+    if (input.length === 29 && lowerInput.includes('pid.sick.com/')) {
+        return input.split('/')[2];
+    }
+    // Case 8: pid.sick.com/1138661/23400015 -> extract 234000150 (additional 1 digit)
+    else if (input.length === 30 && lowerInput.includes('pid.sick.com/')) {
         return input.split('/')[2];
     }
     // Case 2: pid.sick.com/1234567 -> extract 1234567
-    else if (input.length === 20 && input.includes('pid.sick.com/')) {
+    else if (input.length === 20 && lowerInput.includes('pid.sick.com/')) {
         return input.split('/')[1];
     }
     // Case 3: http://pid.sick.com/1234567 -> extract 1234567
-    else if (input.length === 27 && input.includes('http://pid.sick.com/')) {
+    else if (input.length === 27 && lowerInput.includes('http://pid.sick.com/')) {
         return input.split('/')[3];
     }
     // Case 4: 104631522440725 -> extract last 8 digits (22440725)
@@ -414,14 +456,16 @@ function handleScan(event) {
     if (event.key === 'Enter') {
         event.preventDefault();
         const scanInput = event.target;
+        // Get the current value directly from the input element to ensure we have the latest value
         const userInput = scanInput.value.trim();
         
         // Extract part number for validation
         const scannedPartNumber = extractPartNumber(userInput);
-        // Extract serial number for saving
+        // Extract serial number for saving - ensure it's a string
         const serialNumber = extractSerialNumber(userInput);
+        const serialNumberStr = serialNumber ? String(serialNumber).trim() : null;
         
-        if (!scannedPartNumber || !serialNumber) {
+        if (!scannedPartNumber || !serialNumberStr) {
             highlightError(scanInput);
             playErrorSound();
             scanInput.value = '';
@@ -433,10 +477,10 @@ function handleScan(event) {
         if (scannedPartNumber === currentPartNumber) {
             if (scansRemaining > 0) {
                 // Save only the serial number
-                saveScan(serialNumber);
+                saveScan(serialNumberStr);
                 
                 // Store the serial number in our progress tracking
-                itemsProgress[currentItemIndex].serialNumbers.push(serialNumber);
+                itemsProgress[currentItemIndex].serialNumbers.push(serialNumberStr);
                 
                 scansRemaining--;
                 // Update the progress tracking
@@ -452,6 +496,7 @@ function handleScan(event) {
                         scanInput.focus();  // Keep focus on input
                     }
                 } else {
+                    // Clear input after processing to ensure next scan gets fresh value
                     scanInput.value = '';
                     scanInput.focus();  // Keep focus on input
                 }
@@ -855,23 +900,26 @@ function handleExtractorScan(event) {
     if (event.key === 'Enter') {
         event.preventDefault();
         const input = event.target;
+        // Get the current value directly from the input element to ensure we have the latest value
         const scannedValue = input.value.trim();
         
         // Check if the scanned data contains a serial number
         const hasSerialNumber = hasSeparateSerialNumber(scannedValue);
         
         if (hasSerialNumber) {
-            // Extract both part number and serial number
+            // Extract both part number and serial number from the current scanned value
             let partNumber = extractPartNumber(scannedValue);
             const serialNumber = extractSerialNumber(scannedValue);
+            
             if (partNumber) partNumber = partNumber.toUpperCase();
             if (partNumber && serialNumber) {
                 if (!extractedSerialsByPart[partNumber]) {
                     extractedSerialsByPart[partNumber] = [];
                 }
-                // Add to list if not duplicate
-                if (!extractedSerialsByPart[partNumber].includes(serialNumber)) {
-                    extractedSerialsByPart[partNumber].push(serialNumber);
+                // Add to list if not duplicate - use strict comparison to ensure different serials are added
+                const serialNumberStr = String(serialNumber).trim();
+                if (!extractedSerialsByPart[partNumber].includes(serialNumberStr)) {
+                    extractedSerialsByPart[partNumber].push(serialNumberStr);
                     updateSerialNumbersList();
                 }
             } else {
@@ -894,6 +942,7 @@ function handleExtractorScan(event) {
             }
         }
         
+        // Clear input after processing to ensure next scan gets fresh value
         input.value = '';
         input.focus();
     }
@@ -901,16 +950,21 @@ function handleExtractorScan(event) {
 
 // Function to determine if scanned data contains a separate serial number
 function hasSeparateSerialNumber(input) {
+    const lowerInput = input.toLowerCase(); // Normalize for comparison
     // Case 1: pid.sick.com/1138661/23400015 (29 characters) - has separate serial
-    if (input.length === 29 && input.includes('pid.sick.com/')) {
+    if (input.length === 29 && lowerInput.includes('pid.sick.com/')) {
+        return true;
+    }
+    // Case 8: pid.sick.com/1138661/23400015 (30 characters) - has separate serial
+    else if (input.length === 30 && lowerInput.includes('pid.sick.com/')) {
         return true;
     }
     // Case 2: pid.sick.com/1234567 (20 characters) - no separate serial
-    else if (input.length === 20 && input.includes('pid.sick.com/')) {
+    else if (input.length === 20 && lowerInput.includes('pid.sick.com/')) {
         return false;
     }
     // Case 3: http://pid.sick.com/1234567 (27 characters) - no separate serial
-    else if (input.length === 27 && input.includes('http://pid.sick.com/')) {
+    else if (input.length === 27 && lowerInput.includes('http://pid.sick.com/')) {
         return false;
     }
     // Case 4: 104631522440725 (15 characters) - has separate serial (last 8 digits)
@@ -1255,9 +1309,10 @@ function toggleStockTakeMode() {
         extractorContainer.style.display = 'none';
         stockTakeContainer.style.display = 'block';
         document.getElementById('stockTakeScanInput').focus();
-        // Clear previous state
-        stockTakeItems = [];
-        stockTakeScannedCounts = {};
+        // Only clear state if no items are loaded (preserve loaded progress)
+        if (stockTakeItems.length === 0) {
+            stockTakeScannedCounts = {};
+        }
         renderStockTakeTable();
     }
 }
@@ -1291,10 +1346,17 @@ function handleStockTakeUpload(event) {
 
 function renderStockTakeTable() {
     const container = document.getElementById('stockTakeTableContainer');
+    const saveBtn = document.getElementById('saveStockTakeBtn');
+    
     if (stockTakeItems.length === 0) {
         container.innerHTML = '';
+        if (saveBtn) saveBtn.style.display = 'none';
         return;
     }
+    
+    // Show save button when there are items
+    if (saveBtn) saveBtn.style.display = 'inline-block';
+    
     let tableHtml = `
         <div id="stockTakeErrorMsg" style="color:#e53e3e;margin-bottom:10px;"></div>
         <table class="stock-take-table">
@@ -1302,17 +1364,24 @@ function renderStockTakeTable() {
                 <tr>
                     <th>Part Number</th>
                     <th>Scanned / Quantity</th>
-                    <th></th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
     `;
     stockTakeItems.forEach((item, index) => {
+        const isComplete = item.scanned >= item.quantity;
         tableHtml += `
-            <tr id="stock-item-row-${index}">
+            <tr id="stock-item-row-${index}" ${isComplete ? 'style="background-color: #d4edda;"' : ''}>
                 <td>${item.partNumber}</td>
                 <td>${item.scanned} / ${item.quantity}</td>
                 <td>
+                    <button class="manual-increment-btn" data-index="${index}" title="Add 1 Manually" style="margin-right: 5px;">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                    <button class="manual-decrement-btn" data-index="${index}" title="Subtract 1" style="margin-right: 5px;" ${item.scanned <= 0 ? 'disabled' : ''}>
+                        <i class="fas fa-minus"></i>
+                    </button>
                     <button class="remove-stock-item-btn" data-index="${index}" title="Remove Item">
                         <i class="fas fa-times"></i>
                     </button>
@@ -1328,51 +1397,38 @@ function renderStockTakeTable() {
         btn.addEventListener('click', (event) => {
             const indexToRemove = parseInt(event.currentTarget.getAttribute('data-index'), 10);
             stockTakeItems.splice(indexToRemove, 1);
+            saveStockTakeProgress(); // Auto-save after removal
             renderStockTakeTable();
         });
     });
-}
-
-function handleStockTakeScan(event) {
-    if (event.key === 'Enter') {
-        event.preventDefault();
-        const scanInput = event.target;
-        const userInput = scanInput.value.trim();
-        const scannedPartNumber = extractPartNumber(userInput);
-        const errorMsgDiv = document.getElementById('stockTakeErrorMsg');
-        if (errorMsgDiv) errorMsgDiv.textContent = '';
-        if (!scannedPartNumber) {
-            highlightError(scanInput);
-            playErrorSound();
-            if (errorMsgDiv) errorMsgDiv.textContent = 'item not found';
-            scanInput.value = '';
-            scanInput.focus();
-            return;
-        }
-        const itemIndex = stockTakeItems.findIndex(item => item.partNumber === scannedPartNumber);
-        if (itemIndex !== -1) {
-            const item = stockTakeItems[itemIndex];
+    
+    // Add event listeners for manual increment buttons
+    document.querySelectorAll('.manual-increment-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            const index = parseInt(event.currentTarget.getAttribute('data-index'), 10);
+            const item = stockTakeItems[index];
             if (item.scanned < item.quantity) {
                 item.scanned++;
                 successSound.currentTime = 0;
                 successSound.play().catch(() => {});
-                // Remove item if done
-                if (item.scanned >= item.quantity) {
-                    stockTakeItems.splice(itemIndex, 1);
-                }
+                saveStockTakeProgress(); // Auto-save after increment
                 renderStockTakeTable();
-            } else {
-                playErrorSound();
-                highlightError(scanInput, 500);
             }
-        } else {
-            highlightError(scanInput);
-            playErrorSound();
-            if (errorMsgDiv) errorMsgDiv.textContent = 'item not found';
-        }
-        scanInput.value = '';
-        scanInput.focus();
-    }
+        });
+    });
+    
+    // Add event listeners for manual decrement buttons
+    document.querySelectorAll('.manual-decrement-btn').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            const index = parseInt(event.currentTarget.getAttribute('data-index'), 10);
+            const item = stockTakeItems[index];
+            if (item.scanned > 0) {
+                item.scanned--;
+                saveStockTakeProgress(); // Auto-save after decrement
+                renderStockTakeTable();
+            }
+        });
+    });
 }
 
 // Camera scanner logic for stock take
@@ -1424,6 +1480,226 @@ function stopStockTakeScanner() {
             document.getElementById('stockTakeReader').style.display = 'none';
             stockTakeScannerInstance = null;
         }).catch(() => {});
+    }
+}
+
+// Function to show manual input modal
+function showManualInputModal() {
+    const modal = document.getElementById('manualInputModal');
+    modal.style.display = 'block';
+    document.getElementById('manualPartNumber').value = '';
+    document.getElementById('manualQuantity').value = '';
+    document.getElementById('manualPartNumber').focus();
+}
+
+// Function to close manual input modal
+function closeManualInputModal() {
+    const modal = document.getElementById('manualInputModal');
+    modal.style.display = 'none';
+}
+
+// Function to confirm manual input
+function confirmManualInput() {
+    const partNumber = document.getElementById('manualPartNumber').value.trim();
+    const quantity = parseInt(document.getElementById('manualQuantity').value, 10);
+    
+    if (!partNumber) {
+        alert('Please enter a part number');
+        return;
+    }
+    
+    if (!quantity || quantity <= 0) {
+        alert('Please enter a valid quantity (greater than 0)');
+        return;
+    }
+    
+    // Check if part number already exists
+    const existingIndex = stockTakeItems.findIndex(item => item.partNumber === partNumber);
+    
+    if (existingIndex !== -1) {
+        // Update existing item
+        stockTakeItems[existingIndex].quantity = quantity;
+        // Don't reset scanned count if it exists
+        if (stockTakeItems[existingIndex].scanned === undefined) {
+            stockTakeItems[existingIndex].scanned = 0;
+        }
+    } else {
+        // Add new item
+        stockTakeItems.push({
+            partNumber: partNumber,
+            quantity: quantity,
+            scanned: 0
+        });
+    }
+    
+    closeManualInputModal();
+    saveStockTakeProgress(); // Auto-save after manual input
+    renderStockTakeTable();
+    document.getElementById('stockTakeScanInput').focus();
+}
+
+// Function to save stock take progress
+async function saveStockTakeProgress() {
+    if (stockTakeItems.length === 0) {
+        alert('No items to save');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/save-stock-take', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                items: stockTakeItems
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            // Show success message briefly
+            const saveBtn = document.getElementById('saveStockTakeBtn');
+            const originalText = saveBtn.innerHTML;
+            saveBtn.innerHTML = '<i class="fas fa-check"></i> Saved!';
+            saveBtn.style.backgroundColor = '#28a745';
+            setTimeout(() => {
+                saveBtn.innerHTML = originalText;
+                saveBtn.style.backgroundColor = '';
+            }, 2000);
+        } else {
+            throw new Error(data.error || 'Failed to save');
+        }
+    } catch (error) {
+        console.error('Error saving stock take:', error);
+        alert('Failed to save stock take progress: ' + error.message);
+    }
+}
+
+// Function to show load stock take modal
+async function showLoadStockTakeModal() {
+    const modal = document.getElementById('loadStockTakeModal');
+    const filesList = document.getElementById('stockTakeFilesList');
+    
+    modal.style.display = 'block';
+    filesList.innerHTML = '<p>Loading files...</p>';
+    
+    try {
+        const response = await fetch('/load-stock-take');
+        const data = await response.json();
+        
+        if (response.ok && data.files && data.files.length > 0) {
+            filesList.innerHTML = '';
+            data.files.forEach(file => {
+                const fileItem = document.createElement('div');
+                fileItem.className = 'session-item';
+                fileItem.style.cssText = 'padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;';
+                fileItem.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>${file.fileName}</strong><br>
+                            <small>${new Date(file.date).toLocaleString()}</small>
+                        </div>
+                        <button class="action-button small" data-file="${file.fileName}" style="margin-left: 10px;">
+                            Load
+                        </button>
+                    </div>
+                `;
+                
+                fileItem.querySelector('button').addEventListener('click', () => {
+                    loadStockTakeFile(file.fileName);
+                });
+                
+                filesList.appendChild(fileItem);
+            });
+        } else {
+            filesList.innerHTML = '<p>No saved progress files found.</p>';
+        }
+    } catch (error) {
+        console.error('Error loading stock take files:', error);
+        filesList.innerHTML = '<p style="color: red;">Error loading files.</p>';
+    }
+}
+
+// Function to close load stock take modal
+function closeLoadStockTakeModal() {
+    const modal = document.getElementById('loadStockTakeModal');
+    modal.style.display = 'none';
+}
+
+// Function to load stock take file
+async function loadStockTakeFile(fileName) {
+    try {
+        const response = await fetch(`/get-stock-take/${fileName}`);
+        const data = await response.json();
+        
+        if (response.ok && data.items) {
+            stockTakeItems = data.items;
+            closeLoadStockTakeModal();
+            renderStockTakeTable();
+            document.getElementById('stockTakeScanInput').focus();
+            
+            // Show success message
+            const errorMsgDiv = document.getElementById('stockTakeErrorMsg');
+            if (errorMsgDiv) {
+                errorMsgDiv.textContent = `Loaded ${stockTakeItems.length} items from ${fileName}`;
+                errorMsgDiv.style.color = '#28a745';
+                setTimeout(() => {
+                    errorMsgDiv.textContent = '';
+                }, 3000);
+            }
+        } else {
+            throw new Error(data.error || 'Failed to load file');
+        }
+    } catch (error) {
+        console.error('Error loading stock take file:', error);
+        alert('Failed to load stock take file: ' + error.message);
+    }
+}
+
+// Auto-save on scan
+function handleStockTakeScan(event) {
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        const scanInput = event.target;
+        const userInput = scanInput.value.trim();
+        const scannedPartNumber = extractPartNumber(userInput);
+        const errorMsgDiv = document.getElementById('stockTakeErrorMsg');
+        if (errorMsgDiv) errorMsgDiv.textContent = '';
+        if (!scannedPartNumber) {
+            highlightError(scanInput);
+            playErrorSound();
+            if (errorMsgDiv) errorMsgDiv.textContent = 'item not found';
+            scanInput.value = '';
+            scanInput.focus();
+            return;
+        }
+        const itemIndex = stockTakeItems.findIndex(item => item.partNumber === scannedPartNumber);
+        if (itemIndex !== -1) {
+            const item = stockTakeItems[itemIndex];
+            if (item.scanned < item.quantity) {
+                item.scanned++;
+                successSound.currentTime = 0;
+                successSound.play().catch(() => {});
+                // Auto-save after scan
+                saveStockTakeProgress();
+                // Remove item if done
+                if (item.scanned >= item.quantity) {
+                    stockTakeItems.splice(itemIndex, 1);
+                }
+                renderStockTakeTable();
+            } else {
+                playErrorSound();
+                highlightError(scanInput, 500);
+            }
+        } else {
+            highlightError(scanInput);
+            playErrorSound();
+            if (errorMsgDiv) errorMsgDiv.textContent = 'item not found';
+        }
+        scanInput.value = '';
+        scanInput.focus();
     }
 }
 // ----- END STOCK TAKE FUNCTIONS ----- 

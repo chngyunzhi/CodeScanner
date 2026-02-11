@@ -22,6 +22,36 @@ const PORT = process.env.PORT || 3000;
 let publicUrl = '';
 let tunnel = null;
 let ngrokUrl = null;
+let tunnelMonitorInterval = null;
+let isSettingUpTunnel = false;
+
+function stopTunnelMonitor() {
+    if (tunnelMonitorInterval) {
+        clearInterval(tunnelMonitorInterval);
+        tunnelMonitorInterval = null;
+    }
+}
+
+async function restartTunnel(reason) {
+    try {
+        console.log(`Restarting tunnel${reason ? ` (${reason})` : ''}...`);
+        stopTunnelMonitor();
+
+        if (tunnel) {
+            try {
+                tunnel.close();
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        tunnel = null;
+        publicUrl = '';
+        await setupTunnel();
+    } catch (error) {
+        console.error('Error restarting tunnel:', error);
+    }
+}
 
 // Add a global variable to store the processed items
 let lastProcessedItems = [];
@@ -104,6 +134,9 @@ async function setupNgrokTunnel() {
 // Function to set up localtunnel with retry mechanism
 async function setupTunnel() {
     try {
+        if (isSettingUpTunnel) return publicUrl;
+        isSettingUpTunnel = true;
+
         if (!tunnel) {
             console.log('Setting up tunnel with subdomain: itemscanner');
             
@@ -161,6 +194,17 @@ async function setupTunnel() {
                 // Try to reconnect after a short delay
                 setTimeout(setupTunnel, 5000);
             });
+
+            // Health monitor / keep-alive:
+            // localtunnel can show "503 - Tunnel Unavailable" after some time without emitting close/error.
+            stopTunnelMonitor();
+            tunnelMonitorInterval = setInterval(async () => {
+                if (!publicUrl) return;
+                const ok = await testTunnelUrl(publicUrl);
+                if (!ok) {
+                    await restartTunnel('health check failed (possible 503 / idle drop)');
+                }
+            }, 2 * 60 * 1000); // every 2 minutes
         }
         return publicUrl;
     } catch (error) {
@@ -190,6 +234,8 @@ async function setupTunnel() {
         // Try to reconnect after a longer delay
         setTimeout(setupTunnel, 10000);
         return null;
+    } finally {
+        isSettingUpTunnel = false;
     }
 }
 
@@ -603,8 +649,8 @@ app.get('/download-excel', (req, res) => {
 // Endpoint to save extracted serial numbers
 app.post('/save-extracted-serials', express.json(), (req, res) => {
     try {
-        const { sessionName, serialNumbers } = req.body;
-        if (!sessionName || !serialNumbers || !Array.isArray(serialNumbers)) {
+        const { sessionName, serialNumbersByPart } = req.body;
+        if (!sessionName || !serialNumbersByPart || typeof serialNumbersByPart !== 'object') {
             return res.status(400).json({ error: 'Invalid input data' });
         }
 
@@ -614,11 +660,43 @@ app.post('/save-extracted-serials', express.json(), (req, res) => {
             fs.mkdirSync(sessionFolder, { recursive: true });
         }
 
-        // Create a single file for all extracted serial numbers
-        const filePath = path.join(sessionFolder, 'extracted_serial_numbers.txt');
-        fs.writeFileSync(filePath, serialNumbers.join('\n'));
+        // Write one txt file per part number (matches download-session behavior)
+        let totalSerials = 0;
+        const combinedLines = [];
 
-        res.json({ success: true });
+        Object.entries(serialNumbersByPart).forEach(([partNumberRaw, serialsRaw]) => {
+            const partNumber = String(partNumberRaw || '').trim();
+            if (!partNumber) return;
+
+            const serials = Array.isArray(serialsRaw) ? serialsRaw : [];
+            const cleanedSerials = serials
+                .map(s => String(s).trim())
+                .filter(s => s.length > 0);
+
+            if (cleanedSerials.length === 0) return;
+
+            totalSerials += cleanedSerials.length;
+
+            // Safe filename from part number
+            const safePart = partNumber.replace(/[^a-z0-9]/gi, '_');
+            const filePath = path.join(sessionFolder, `${safePart}.txt`);
+            fs.writeFileSync(filePath, cleanedSerials.join('\n'), 'utf8');
+
+            // Also build a combined file for convenience
+            combinedLines.push(`[${partNumber}]`);
+            cleanedSerials.forEach(sn => combinedLines.push(sn));
+            combinedLines.push(''); // blank line between parts
+        });
+
+        // Always write a combined file too (helps when user wants a single text file)
+        const combinedPath = path.join(sessionFolder, 'extracted_serial_numbers.txt');
+        fs.writeFileSync(combinedPath, combinedLines.join('\n'), 'utf8');
+
+        if (totalSerials === 0) {
+            return res.status(400).json({ error: 'No serial numbers to save' });
+        }
+
+        res.json({ success: true, parts: Object.keys(serialNumbersByPart).length, totalSerials });
     } catch (error) {
         console.error('Error saving extracted serial numbers:', error);
         res.status(500).json({ error: 'Failed to save serial numbers: ' + error.message });
@@ -665,6 +743,15 @@ app.get('/network-info', async (req, res) => {
     if (ngrokUrl && !publicUrl) {
         activePublicUrl = ngrokUrl;
         tunnelType = 'ngrok';
+    }
+
+    // If we have a public URL, make a quick health check. If it fails, restart tunnel.
+    if (activePublicUrl && activePublicUrl.startsWith('http')) {
+        const ok = await testTunnelUrl(activePublicUrl);
+        if (!ok && tunnelType === 'localtunnel') {
+            await restartTunnel('network-info health check failed');
+            activePublicUrl = publicUrl;
+        }
     }
     
     res.json({
@@ -763,13 +850,15 @@ app.post('/upload-stock-take', upload.single('file'), (req, res) => {
 
         if (fileExt === '.csv') {
             const csvData = fs.readFileSync(filePath, 'utf8');
-            const lines = csvData.split('\\n');
+            // Handle both Windows (\r\n) and Unix (\n) line endings
+            const lines = csvData.split(/\r?\n/).filter(line => line.trim() !== '');
             const dataRows = lines.slice(1); // Skip header
 
             items = dataRows
                 .filter(line => line.trim() !== '')
                 .map(line => {
-                    const columns = line.split(',');
+                    // Handle CSV with potential quoted fields
+                    const columns = line.split(',').map(col => col.trim().replace(/^"|"$/g, ''));
                     return {
                         partNumber: columns[1] ? columns[1].trim() : '',
                         quantity: parseInt(columns[2] ? columns[2].trim() : '0', 10)
@@ -797,6 +886,90 @@ app.post('/upload-stock-take', upload.single('file'), (req, res) => {
     } catch (error) {
         console.error('Error processing stock take file:', error);
         res.status(500).json({ error: 'Error processing stock take file' });
+    }
+});
+
+// Create stock take directory if it doesn't exist
+const stockTakeDir = path.join(__dirname, 'stock_take');
+if (!fs.existsSync(stockTakeDir)) {
+    fs.mkdirSync(stockTakeDir, { recursive: true });
+}
+
+// Endpoint to save stock take progress
+app.post('/save-stock-take', express.json(), (req, res) => {
+    try {
+        const { items } = req.body;
+        if (!items || !Array.isArray(items)) {
+            res.status(400).json({ error: 'Invalid items data' });
+            return;
+        }
+
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const fileName = `stock_take_${timestamp}.txt`;
+        const filePath = path.join(stockTakeDir, fileName);
+
+        // Format: partNumber,quantity,scanned (one per line)
+        const content = items.map(item => 
+            `${item.partNumber},${item.quantity},${item.scanned || 0}`
+        ).join('\n');
+
+        fs.writeFileSync(filePath, content, 'utf8');
+        res.json({ success: true, fileName: fileName });
+    } catch (error) {
+        console.error('Error saving stock take:', error);
+        res.status(500).json({ error: 'Failed to save stock take progress' });
+    }
+});
+
+// Endpoint to load stock take progress
+app.get('/load-stock-take', (req, res) => {
+    try {
+        const files = fs.readdirSync(stockTakeDir)
+            .filter(file => file.endsWith('.txt'))
+            .map(file => {
+                const filePath = path.join(stockTakeDir, file);
+                const stats = fs.statSync(filePath);
+                return {
+                    fileName: file,
+                    date: stats.mtime
+                };
+            })
+            .sort((a, b) => b.date - a.date); // Most recent first
+
+        res.json({ files });
+    } catch (error) {
+        console.error('Error loading stock take files:', error);
+        res.status(500).json({ error: 'Failed to load stock take files' });
+    }
+});
+
+// Endpoint to get specific stock take file content
+app.get('/get-stock-take/:fileName', (req, res) => {
+    try {
+        const fileName = req.params.fileName;
+        const filePath = path.join(stockTakeDir, fileName);
+
+        if (!fs.existsSync(filePath)) {
+            res.status(404).json({ error: 'File not found' });
+            return;
+        }
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        const lines = content.split(/\r?\n/).filter(line => line.trim() !== '');
+        
+        const items = lines.map(line => {
+            const [partNumber, quantity, scanned] = line.split(',');
+            return {
+                partNumber: partNumber ? partNumber.trim() : '',
+                quantity: parseInt(quantity ? quantity.trim() : '0', 10),
+                scanned: parseInt(scanned ? scanned.trim() : '0', 10)
+            };
+        }).filter(item => item.partNumber && item.quantity > 0);
+
+        res.json({ items });
+    } catch (error) {
+        console.error('Error reading stock take file:', error);
+        res.status(500).json({ error: 'Failed to read stock take file' });
     }
 });
 
